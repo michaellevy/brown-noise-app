@@ -1,0 +1,405 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no">
+<title>Noise</title>
+<meta name="theme-color" content="#05070a">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="./manifest.webmanifest">
+<link rel="icon" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<style>
+  :root {
+    --bg: #05070a;
+    --fg: #7d8a99;
+    --fg-dim: #3a4553;
+    --accent: #c8956b;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; height: 100%;
+    background: var(--bg); color: var(--fg);
+    font: 400 16px/1.4 system-ui, -apple-system, sans-serif;
+    overscroll-behavior: none; user-select: none;
+  }
+  body {
+    display: flex; flex-direction: column;
+    align-items: center; justify-content: center;
+    gap: 3rem;
+    padding: max(2rem, env(safe-area-inset-top)) 2rem max(2rem, env(safe-area-inset-bottom));
+  }
+
+  /* Big central button */
+  #power {
+    position: relative;
+    width: min(62vw, 240px); aspect-ratio: 1;
+    border: 1px solid var(--fg-dim); border-radius: 50%;
+    background: radial-gradient(circle at 50% 50%, #10151c 0%, #05070a 70%);
+    color: var(--fg);
+    font-size: 1.05rem; letter-spacing: 0.22em; text-transform: uppercase;
+    display: grid; place-items: center;
+    transition: color .5s, border-color .5s, box-shadow .8s, transform .15s;
+  }
+  #power:active { transform: scale(0.97); }
+  body.on #power {
+    color: var(--accent);
+    border-color: rgba(200,149,107,.45);
+    box-shadow: 0 0 60px -8px rgba(200,149,107,.28), inset 0 0 40px -12px rgba(200,149,107,.22);
+  }
+  /* Slow breathing halo while playing */
+  #power::after {
+    content: ""; position: absolute; inset: -14px;
+    border-radius: 50%; border: 1px solid rgba(200,149,107,.18);
+    opacity: 0; transition: opacity .8s;
+  }
+  body.on #power::after { opacity: 1; animation: breathe 7s ease-in-out infinite; }
+  @keyframes breathe {
+    0%, 100% { transform: scale(1);    opacity: .30; }
+    50%      { transform: scale(1.06); opacity: .08; }
+  }
+  @media (prefers-reduced-motion: reduce) {
+    body.on #power::after { animation: none; }
+  }
+
+  /* Controls */
+  #controls {
+    width: min(100%, 340px);
+    display: flex; flex-direction: column; gap: 1.75rem;
+    transition: opacity 1.5s;
+  }
+  body.dim #controls { opacity: .12; }
+  .row { display: flex; flex-direction: column; gap: .6rem; }
+  .row label {
+    display: flex; justify-content: space-between;
+    font-size: .7rem; letter-spacing: .18em; text-transform: uppercase;
+    color: var(--fg-dim);
+  }
+  input[type=range] {
+    -webkit-appearance: none; appearance: none;
+    width: 100%; height: 34px; background: transparent; margin: 0;
+  }
+  input[type=range]::-webkit-slider-runnable-track {
+    height: 2px; background: var(--fg-dim); border-radius: 2px;
+  }
+  input[type=range]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none;
+    width: 26px; height: 26px; margin-top: -12px;
+    border-radius: 50%; background: var(--fg); border: none;
+  }
+  input[type=range]::-moz-range-track {
+    height: 2px; background: var(--fg-dim); border-radius: 2px;
+  }
+  input[type=range]::-moz-range-thumb {
+    width: 26px; height: 26px; border: none;
+    border-radius: 50%; background: var(--fg);
+  }
+  #err {
+    position: fixed; bottom: 1rem; left: 1rem; right: 1rem;
+    text-align: center; font-size: .8rem; color: #b4685a;
+  }
+</style>
+</head>
+<body>
+
+<button id="power" aria-pressed="false">Start</button>
+
+<div id="controls">
+  <div class="row">
+    <label for="vol"><span>Volume</span><span id="volVal"></span></label>
+    <input id="vol" type="range" min="0" max="1" step="0.01" value="0.5">
+  </div>
+  <div class="row">
+    <label for="tone"><span>Deep</span><span>Bright</span></label>
+    <input id="tone" type="range" min="0" max="1" step="0.01" value="0.3">
+  </div>
+</div>
+
+<div id="err" hidden></div>
+
+<audio id="sink" loop></audio>
+
+<script>
+/* ------------------------------------------------------------------
+   Noise is synthesised one sample at a time, so there is no buffer and
+   therefore no loop point to click at. It can run indefinitely.
+
+   Two engines generate it from the identical Gen below:
+     - AudioWorklet (preferred) — runs on the audio thread, immune to
+       main-thread jank. Requires a secure context (https or localhost).
+     - ScriptProcessorNode (fallback) — deprecated and main-thread, but
+       available on plain http, so the app still works when served over
+       a LAN address. Still procedural, so still seamless.
+
+   Output is routed through a MediaStreamDestination into an <audio>
+   element rather than straight to ctx.destination. On Android, that's
+   what makes Chrome treat this as real media playback: it keeps the
+   audio alive with the screen off and gives us lock-screen controls.
+------------------------------------------------------------------- */
+
+// Paul Kellet's refined pink-noise filter: natural, non-fatiguing spectrum.
+// Defined once as a real class, then stringified into the worklet below, so
+// both engines are guaranteed to be sample-identical.
+class Gen {
+  constructor() { this.b0=0; this.b1=0; this.b2=0; this.b3=0; this.b4=0; this.b5=0; this.b6=0; }
+  next() {
+    const w = Math.random() * 2 - 1;
+    this.b0 = 0.99886 * this.b0 + w * 0.0555179;
+    this.b1 = 0.99332 * this.b1 + w * 0.0750759;
+    this.b2 = 0.96900 * this.b2 + w * 0.1538520;
+    this.b3 = 0.86650 * this.b3 + w * 0.3104856;
+    this.b4 = 0.55000 * this.b4 + w * 0.5329522;
+    this.b5 = -0.7616 * this.b5 - w * 0.0168980;
+    const pink = this.b0 + this.b1 + this.b2 + this.b3 + this.b4 + this.b5 + this.b6 + w * 0.5362;
+    this.b6 = w * 0.115926;
+    return pink * 0.11;
+  }
+}
+
+// Two independent generators -> decorrelated stereo, which sounds wide and
+// enveloping instead of like a point source in your head.
+const WORKLET = Gen.toString() + `
+class NoiseProcessor extends AudioWorkletProcessor {
+  constructor() { super(); this.l = new Gen(); this.r = new Gen(); }
+  process(inputs, outputs) {
+    const out = outputs[0];
+    const l = out[0], r = out[1];
+    for (let i = 0; i < l.length; i++) {
+      l[i] = this.l.next();
+      if (r) r[i] = this.r.next();
+    }
+    return true;
+  }
+}
+registerProcessor('noise', NoiseProcessor);
+`;
+
+const $ = (id) => document.getElementById(id);
+const powerBtn = $('power'), volEl = $('vol'), toneEl = $('tone'),
+      volVal = $('volVal'), sink = $('sink'), errEl = $('err');
+
+let ctx = null, gain = null, lp1 = null, lp2 = null;
+let playing = false, starting = false;
+
+const FADE_IN = 1.5, FADE_OUT = 0.7;
+
+/* --- settings persistence --- */
+const store = {
+  get(k, d) { const v = localStorage.getItem('noise.' + k); return v === null ? d : parseFloat(v); },
+  set(k, v) { try { localStorage.setItem('noise.' + k, v); } catch (e) {} }
+};
+/* --- tone range --- */
+// The slider sweeps an exponential cutoff across the band that's actually
+// usable for sleep: 150 Hz is a deep brown rumble, 1.8 kHz is as bright as
+// this gets. An earlier version ran to 18 kHz, but everything above ~1 kHz
+// was harsh hiss nobody would sleep through, so most of the travel was dead
+// and the useful part had no resolution.
+const TONE_LO = 150, TONE_HI = 1800;
+
+// That earlier version mapped 110 Hz .. 18 kHz. Rescale any saved setting into
+// the new range so an existing install doesn't silently change how it sounds.
+(function migrateTone() {
+  if (store.get('scale', 1) >= 2) return;
+  const old = localStorage.getItem('noise.tone');
+  if (old !== null) {
+    const f = 110 * Math.pow(18000 / 110, parseFloat(old));
+    const t = Math.log(f / TONE_LO) / Math.log(TONE_HI / TONE_LO);
+    store.set('tone', Math.min(1, Math.max(0, t)).toFixed(3));
+  }
+  store.set('scale', 2);
+})();
+
+volEl.value  = store.get('vol', 0.5);
+toneEl.value = store.get('tone', 0.49);   // ~510 Hz, mid-way into the useful band
+
+/* --- parameter mapping --- */
+const cutoff = () => TONE_LO * Math.pow(TONE_HI / TONE_LO, parseFloat(toneEl.value));
+// Low cutoffs throw away most of the energy, so add makeup gain to keep
+// perceived loudness roughly even as you sweep the slider.
+//
+// Headroom matters more than it looks here: noise peaks are stochastic, so
+// over eight hours you hit ~6.5-sigma excursions rather than the ~5-sigma a
+// short test shows. These constants are measured so the worst case (volume
+// 1.0, tone 0.0) still peaks near -3 dBFS across a full night. Turn the
+// phone up rather than raising this — clipping crackle is the one artifact
+// you'd actually wake up to.
+const level = () => {
+  const v = parseFloat(volEl.value);
+  const makeup = Math.pow(18000 / cutoff(), 0.18);
+  return v * v * 0.42 * makeup;   // v*v gives a natural-feeling volume taper
+};
+
+function showVol() { volVal.textContent = Math.round(volEl.value * 100) + '%'; }
+showVol();
+
+/* --- audio graph --- */
+// Kept on module scope purely so the ScriptProcessorNode isn't garbage
+// collected out from under us mid-playback.
+let spNode = null;
+
+async function makeSource() {
+  // ctx.audioWorklet is undefined on insecure origins, so feature-detect the
+  // object itself rather than assuming it exists.
+  if (ctx.audioWorklet && typeof ctx.audioWorklet.addModule === 'function') {
+    try {
+      const url = URL.createObjectURL(new Blob([WORKLET], { type: 'application/javascript' }));
+      await ctx.audioWorklet.addModule(url);
+      URL.revokeObjectURL(url);
+      return new AudioWorkletNode(ctx, 'noise', {
+        numberOfInputs: 0, numberOfOutputs: 1, outputChannelCount: [2]
+      });
+    } catch (e) {
+      /* fall through to the ScriptProcessor path */
+    }
+  }
+
+  if (!ctx.createScriptProcessor) throw new Error('no audio engine available in this browser');
+
+  note('Running in fallback audio mode — serve over https for the better engine.');
+  spNode = ctx.createScriptProcessor(4096, 0, 2);
+  const gl = new Gen(), gr = new Gen();
+  spNode.onaudioprocess = (e) => {
+    const l = e.outputBuffer.getChannelData(0);
+    const r = e.outputBuffer.getChannelData(1);
+    for (let i = 0; i < l.length; i++) { l[i] = gl.next(); r[i] = gr.next(); }
+  };
+  return spNode;
+}
+
+async function build() {
+  ctx = new (window.AudioContext || window.webkitAudioContext)();
+  const src = await makeSource();
+
+  // 4th-order (24 dB/oct) rolloff — enough to get a genuinely deep,
+  // brown-sounding rumble at the low end of the tone slider.
+  lp1 = ctx.createBiquadFilter(); lp1.type = 'lowpass'; lp1.Q.value = 0.541;
+  lp2 = ctx.createBiquadFilter(); lp2.type = 'lowpass'; lp2.Q.value = 1.307;
+  lp1.frequency.value = lp2.frequency.value = cutoff();
+
+  gain = ctx.createGain();
+  gain.gain.value = 0;
+
+  const dest = ctx.createMediaStreamDestination();
+  src.connect(lp1).connect(lp2).connect(gain).connect(dest);
+
+  sink.srcObject = dest.stream;
+  sink.volume = 1;
+}
+
+function setupMediaSession() {
+  if (!('mediaSession' in navigator)) return;
+  navigator.mediaSession.metadata = new MediaMetadata({
+    title: 'Noise',
+    artist: 'Sleep',
+    artwork: [{ src: './icon-512.png', sizes: '512x512', type: 'image/png' }]
+  });
+  navigator.mediaSession.setActionHandler('play', () => start());
+  navigator.mediaSession.setActionHandler('pause', () => stop());
+  navigator.mediaSession.setActionHandler('stop', () => stop());
+}
+
+async function start() {
+  if (playing || starting) return;
+  starting = true;
+  try {
+    if (!ctx) await build();
+    if (ctx.state === 'suspended') await ctx.resume();
+    await sink.play();
+
+    const t = ctx.currentTime;
+    gain.gain.cancelScheduledValues(t);
+    gain.gain.setValueAtTime(Math.max(gain.gain.value, 0.0001), t);
+    gain.gain.exponentialRampToValueAtTime(Math.max(level(), 0.0001), t + FADE_IN);
+
+    playing = true;
+    document.body.classList.add('on');
+    powerBtn.textContent = 'Stop';
+    powerBtn.setAttribute('aria-pressed', 'true');
+    if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'playing';
+    setupMediaSession();
+    scheduleDim();
+  } catch (e) {
+    fail(e);
+  } finally {
+    starting = false;
+  }
+}
+
+function stop() {
+  if (!playing) return;
+  playing = false;
+  const t = ctx.currentTime;
+  gain.gain.cancelScheduledValues(t);
+  gain.gain.setValueAtTime(gain.gain.value, t);
+  gain.gain.exponentialRampToValueAtTime(0.0001, t + FADE_OUT);
+  // Let the fade finish before tearing down the stream.
+  setTimeout(() => { if (!playing) sink.pause(); }, FADE_OUT * 1000 + 120);
+
+  document.body.classList.remove('on', 'dim');
+  powerBtn.textContent = 'Start';
+  powerBtn.setAttribute('aria-pressed', 'false');
+  if ('mediaSession' in navigator) navigator.mediaSession.playbackState = 'paused';
+  clearTimeout(dimTimer);
+}
+
+function note(msg) {
+  errEl.hidden = false;
+  errEl.style.color = '#4d5866';
+  errEl.textContent = msg;
+}
+
+function fail(e) {
+  errEl.hidden = false;
+  errEl.style.color = '#b4685a';
+  const msg = e && e.message ? e.message : String(e);
+  errEl.textContent = 'Audio failed to start: ' + msg +
+    (window.isSecureContext ? '' : ' — this page is on an insecure origin (http). Use https or localhost.');
+}
+
+/* --- live control --- */
+function applyLevel() {
+  if (!gain || !playing) return;
+  gain.gain.setTargetAtTime(Math.max(level(), 0.0001), ctx.currentTime, 0.05);
+}
+function applyTone() {
+  if (!lp1) return;
+  const f = cutoff(), t = ctx.currentTime;
+  lp1.frequency.setTargetAtTime(f, t, 0.05);
+  lp2.frequency.setTargetAtTime(f, t, 0.05);
+  applyLevel();   // cutoff feeds makeup gain
+}
+
+volEl.addEventListener('input', () => { showVol(); applyLevel(); store.set('vol', volEl.value); });
+toneEl.addEventListener('input', () => { applyTone(); store.set('tone', toneEl.value); });
+
+powerBtn.addEventListener('click', () => playing ? stop() : start());
+
+/* --- dim the UI while playing so the screen isn't a lamp --- */
+let dimTimer;
+function scheduleDim() {
+  clearTimeout(dimTimer);
+  document.body.classList.remove('dim');
+  if (playing) dimTimer = setTimeout(() => document.body.classList.add('dim'), 6000);
+}
+['pointerdown', 'input'].forEach(ev =>
+  document.addEventListener(ev, () => { if (playing) scheduleDim(); }, true));
+
+/* --- recovery: if the OS suspends us, pick back up on return --- */
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'visible' && playing) recover();
+});
+async function recover() {
+  try {
+    if (ctx && ctx.state === 'suspended') await ctx.resume();
+    if (sink.paused) await sink.play();
+  } catch (e) {}
+}
+setInterval(() => { if (playing) recover(); }, 15000);
+
+/* --- service worker: makes it installable and fully offline --- */
+if ('serviceWorker' in navigator && location.protocol !== 'file:') {
+  window.addEventListener('load', () => navigator.serviceWorker.register('./sw.js').catch(() => {}));
+}
+</script>
+</body>
+</html>
