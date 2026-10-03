@@ -184,7 +184,7 @@ registerProcessor('noise', NoiseProcessor);
 
 // Shown on screen so you can tell an update has landed. Keep it in step with
 // CACHE in sw.js — bumping both together is what ships a new version.
-const VERSION = 'v6';
+const VERSION = 'v7';
 
 const $ = (id) => document.getElementById(id);
 $('ver').textContent = VERSION;
@@ -233,15 +233,20 @@ const cutoff = () => TONE_LO * Math.pow(TONE_HI / TONE_LO, parseFloat(toneEl.val
 // Noise peaks are stochastic: over eight hours you hit ~6.5-sigma excursions,
 // so leaving linear headroom for them kept the average level ~8 dB below
 // other phone audio. Instead the output runs through a tanh soft limiter
-// (see build()), which can never clip and only rounds off the rare peaks.
-// At volume 1.0 this measures ~-11 dBFS RMS, comparable to music, with the
-// limiter's distortion products ~20 dB below the noise — inaudible, because
-// they're just more noise. Crucially there's no hard edge, so no crackle.
+// (see build()), which can never clip — there's no hard edge, so no crackle.
+//
+// The top of the volume slider deliberately drives into that limiter, trading
+// distortion for loudness. Measured RMS / distortion-below-signal (mid tone):
+//   ~63%  -> -11.7 dBFS, -22 dB   (clean; where 100% used to be)
+//   ~80%  ->  -8.3 dBFS, -15 dB
+//   100%  ->  -5.6 dBFS, -10 dB   (denser, slightly brighter texture)
+// Distortion of noise is just more noise, so it reads as texture, not grit.
+// Past this the gains flatten out (tanh tops out near -3 dBFS RMS).
 const SHAPER_RANGE = 4;   // shaper input span: +-4 (+12 dBFS) before its flat ends
 const level = () => {
   const v = parseFloat(volEl.value);
   const makeup = Math.pow(18000 / cutoff(), 0.18);
-  return v * v * 1.0 * makeup / SHAPER_RANGE;   // v*v gives a natural-feeling volume taper
+  return v * v * 2.5 * makeup / SHAPER_RANGE;   // v*v gives a natural-feeling volume taper
 };
 
 function showVol() { volVal.textContent = Math.round(volEl.value * 100) + '%'; }

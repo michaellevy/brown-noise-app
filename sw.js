@@ -1,6 +1,6 @@
 // Bump this on every change to index.html — the fetch handler is cache-first,
 // so a stale cache would otherwise keep serving the old app forever.
-const CACHE = 'noise-v6';
+const CACHE = 'noise-v7';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 // cache: 'reload' bypasses the browser's HTTP cache. GitHub Pages serves with

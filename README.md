@@ -33,9 +33,10 @@ The tone slider sweeps a 4th-order (24 dB/oct) lowpass from 150 Hz (deep brown
 rumble) to 1.8 kHz, with makeup gain to keep loudness roughly even across the
 sweep. Noise peaks are stochastic (across eight hours you see ~6.5-sigma
 excursions), so instead of leaving linear headroom for them the output goes
-through a tanh soft limiter. That lets 100% volume sit around -11 dBFS RMS —
-on par with other phone audio — while the output can never clip; the rounded-off
-peaks only add distortion ~20 dB below the noise, which just sounds like noise.
+through a tanh soft limiter. The output can never clip. Up to ~63%
+volume it's clean (~-12 dBFS RMS, on par with other phone audio); above that the
+slider drives into the limiter for up to ~6 dB more, trading in some saturation —
+which on noise just sounds like denser noise.
 
 If you change `index.html`, bump `CACHE` in `sw.js` and `VERSION` in `index.html` (shown top-right) — the fetch handler is
 cache-first and will otherwise serve the old app forever.
