@@ -1,10 +1,14 @@
 // Bump this on every change to index.html — the fetch handler is cache-first,
 // so a stale cache would otherwise keep serving the old app forever.
-const CACHE = 'noise-v5';
+const CACHE = 'noise-v6';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
+// cache: 'reload' bypasses the browser's HTTP cache. GitHub Pages serves with
+// max-age=600, so a plain addAll right after a deploy can store the *old*
+// index.html under the new cache name, and the update silently never lands.
 self.addEventListener('install', (e) => {
-  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(ASSETS)).then(() => self.skipWaiting()));
+  const fresh = ASSETS.map((u) => new Request(u, { cache: 'reload' }));
+  e.waitUntil(caches.open(CACHE).then((c) => c.addAll(fresh)).then(() => self.skipWaiting()));
 });
 
 self.addEventListener('activate', (e) => {
