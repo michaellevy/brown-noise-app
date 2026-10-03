@@ -31,10 +31,11 @@ works with no network at all.
 
 The tone slider sweeps a 4th-order (24 dB/oct) lowpass from 150 Hz (deep brown
 rumble) to 1.8 kHz, with makeup gain to keep loudness roughly even across the
-sweep. Constants are chosen for headroom: noise peaks are stochastic, so across
-eight hours you see ~6.5-sigma excursions rather than the ~5-sigma a short test
-shows. Worst case (volume 1.0, tone 0.0) peaks near -3 dBFS overnight and never
-clips.
+sweep. Noise peaks are stochastic (across eight hours you see ~6.5-sigma
+excursions), so instead of leaving linear headroom for them the output goes
+through a tanh soft limiter. That lets 100% volume sit around -11 dBFS RMS —
+on par with other phone audio — while the output can never clip; the rounded-off
+peaks only add distortion ~20 dB below the noise, which just sounds like noise.
 
 If you change `index.html`, bump `CACHE` in `sw.js` — the fetch handler is
 cache-first and will otherwise serve the old app forever.

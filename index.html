@@ -217,16 +217,18 @@ const cutoff = () => TONE_LO * Math.pow(TONE_HI / TONE_LO, parseFloat(toneEl.val
 // Low cutoffs throw away most of the energy, so add makeup gain to keep
 // perceived loudness roughly even as you sweep the slider.
 //
-// Headroom matters more than it looks here: noise peaks are stochastic, so
-// over eight hours you hit ~6.5-sigma excursions rather than the ~5-sigma a
-// short test shows. These constants are measured so the worst case (volume
-// 1.0, tone 0.0) still peaks near -3 dBFS across a full night. Turn the
-// phone up rather than raising this — clipping crackle is the one artifact
-// you'd actually wake up to.
+// Noise peaks are stochastic: over eight hours you hit ~6.5-sigma excursions,
+// so leaving linear headroom for them kept the average level ~8 dB below
+// other phone audio. Instead the output runs through a tanh soft limiter
+// (see build()), which can never clip and only rounds off the rare peaks.
+// At volume 1.0 this measures ~-11 dBFS RMS, comparable to music, with the
+// limiter's distortion products ~20 dB below the noise — inaudible, because
+// they're just more noise. Crucially there's no hard edge, so no crackle.
+const SHAPER_RANGE = 4;   // shaper input span: +-4 (+12 dBFS) before its flat ends
 const level = () => {
   const v = parseFloat(volEl.value);
   const makeup = Math.pow(18000 / cutoff(), 0.18);
-  return v * v * 0.42 * makeup;   // v*v gives a natural-feeling volume taper
+  return v * v * 1.0 * makeup / SHAPER_RANGE;   // v*v gives a natural-feeling volume taper
 };
 
 function showVol() { volVal.textContent = Math.round(volEl.value * 100) + '%'; }
@@ -279,8 +281,17 @@ async function build() {
   gain = ctx.createGain();
   gain.gain.value = 0;
 
+  // Soft limiter: y = tanh(SHAPER_RANGE * x). level() pre-divides by
+  // SHAPER_RANGE, so for normal signal this is unity gain and |y| < 1 always.
+  // Odd length puts an exact zero at the centre so silence stays silent.
+  const N = 4097, curve = new Float32Array(N);
+  for (let i = 0; i < N; i++) curve[i] = Math.tanh(SHAPER_RANGE * (2 * i / (N - 1) - 1));
+  const limiter = ctx.createWaveShaper();
+  limiter.curve = curve;
+  limiter.oversample = '4x';
+
   const dest = ctx.createMediaStreamDestination();
-  src.connect(lp1).connect(lp2).connect(gain).connect(dest);
+  src.connect(lp1).connect(lp2).connect(gain).connect(limiter).connect(dest);
 
   sink.srcObject = dest.stream;
   sink.volume = 1;
