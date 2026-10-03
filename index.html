@@ -94,6 +94,13 @@
     width: 26px; height: 26px; border: none;
     border-radius: 50%; background: var(--fg);
   }
+  #ver {
+    position: fixed;
+    top: max(.75rem, env(safe-area-inset-top)); right: 1rem;
+    font-size: .65rem; letter-spacing: .12em; color: var(--fg-dim);
+    transition: opacity 1.5s;
+  }
+  body.dim #ver { opacity: .12; }
   #err {
     position: fixed; bottom: 1rem; left: 1rem; right: 1rem;
     text-align: center; font-size: .8rem; color: #b4685a;
@@ -115,6 +122,7 @@
   </div>
 </div>
 
+<div id="ver"></div>
 <div id="err" hidden></div>
 
 <audio id="sink" loop></audio>
@@ -174,7 +182,12 @@ class NoiseProcessor extends AudioWorkletProcessor {
 registerProcessor('noise', NoiseProcessor);
 `;
 
+// Shown on screen so you can tell an update has landed. Keep it in step with
+// CACHE in sw.js — bumping both together is what ships a new version.
+const VERSION = 'v5';
+
 const $ = (id) => document.getElementById(id);
+$('ver').textContent = VERSION;
 const powerBtn = $('power'), volEl = $('vol'), toneEl = $('tone'),
       volVal = $('volVal'), sink = $('sink'), errEl = $('err');
 

@@ -37,5 +37,5 @@ through a tanh soft limiter. That lets 100% volume sit around -11 dBFS RMS —
 on par with other phone audio — while the output can never clip; the rounded-off
 peaks only add distortion ~20 dB below the noise, which just sounds like noise.
 
-If you change `index.html`, bump `CACHE` in `sw.js` — the fetch handler is
+If you change `index.html`, bump `CACHE` in `sw.js` and `VERSION` in `index.html` (shown top-right) — the fetch handler is
 cache-first and will otherwise serve the old app forever.

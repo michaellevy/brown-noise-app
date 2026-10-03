@@ -1,6 +1,6 @@
 // Bump this on every change to index.html — the fetch handler is cache-first,
 // so a stale cache would otherwise keep serving the old app forever.
-const CACHE = 'noise-v4';
+const CACHE = 'noise-v5';
 const ASSETS = ['./', './index.html', './manifest.webmanifest', './icon-192.png', './icon-512.png'];
 
 self.addEventListener('install', (e) => {
